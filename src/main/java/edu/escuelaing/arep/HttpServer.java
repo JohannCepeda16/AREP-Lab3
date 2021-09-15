@@ -16,128 +16,175 @@ import java.util.logging.Logger;
 public class HttpServer {
 
 	private static HttpServer _instance = new HttpServer();
+    private final HashMap<String, Method> services = new HashMap<String, Method>();
 
-	private final HashMap<String, Method> services = new HashMap<String, Method>();
+    private HttpServer() {
 
-	public void startServer(String[] args) throws IOException {
-		ServerSocket serverSocket = null;
-		try {
-			serverSocket = new ServerSocket(35000);
-		} catch (IOException e) {
-			System.err.println("Could not listen on port: 35000.");
-			System.exit(1);
-		}
-		Socket clientSocket = null;
-		boolean running = true;
-		while (running) {
-			try {
-				System.out.println("Listo para recibir ...");
-				clientSocket = serverSocket.accept();
-			} catch (IOException e) {
-				System.err.println("Accept failed.");
-				System.exit(1);
-			}
-		}
-		loadComponents(args);
-		processRequest(clientSocket);
-		serverSocket.close();
-	}
+    }
 
-	public void processRequest(Socket clientSocket) throws IOException {
-		PrintWriter out = new PrintWriter(clientSocket.getOutputStream(), true);
-		BufferedReader in = new BufferedReader(new InputStreamReader(clientSocket.getInputStream()));
-		String inputLine, outputLine;
-		String method = "", path = "", version = "";
-		List<String> headers = new ArrayList<String>();
-		while ((inputLine = in.readLine()) != null) {
-			if (method.isEmpty()) {
-				String[] requestInfo = inputLine.split(" ");
-				method = requestInfo[0];
-				path = requestInfo[1];
-				version = requestInfo[2];
-				System.out.println("Request: " + method + " " + path + " " + version);
-			} else {
-				System.out.println("Header: " + inputLine);
-				headers.add(inputLine);
-			}
+    public static HttpServer getInstance() {
+        return _instance;
+    }
 
-			System.out.println("Received: " + inputLine);
-			if (!in.ready()) {
-				break;
-			}
-		}
+    public void startServer(List<String> args) throws IOException, URISyntaxException {
+        int port = 35000;
+        ServerSocket serverSocket = null;
+        try {
+            serverSocket = new ServerSocket(port);
+        } catch (IOException e) {
+            System.err.println("Could not listen on port: " + port);
+            System.exit(1);
+        }
+        loadComponents(args);
+        Socket clientSocket = null;
+        boolean running = true;
+        while (running) {
+            try {
+                System.out.println("Listo para recibir en puerto ..." + port);
+                clientSocket = serverSocket.accept();
+            } catch (IOException e) {
+                System.err.println("Accept failed.");
+                System.exit(1);
+            }
+            messageConnection(clientSocket);
+        }
 
-		outputLine = getResponse(path);
-		out.println(outputLine);
-		out.close();
-		in.close();
+        serverSocket.close();
+    }
 
-		clientSocket.close();
-	}
+    private void loadComponents(List<String> componentsList) {
+        for (String component : componentsList) {
+            Class c = null;
+            try {
+                c = Class.forName(component);
+                for (Method m : c.getDeclaredMethods()) {
+                    if (m.isAnnotationPresent(RequestMapping.class)) {
+                        String uri = m.getAnnotation(RequestMapping.class).value();
+                        services.put(uri, m);
+                    }
+                }
+                ;
+            } catch (ClassNotFoundException e) {
+                Logger.getLogger(HttpServer.class.getName()).log(Level.SEVERE, "Component not found", e);
+            }
+        }
+    }
 
-	private void loadComponents(String[] componentsList) {
+    public void messageConnection(Socket clientSocket) throws IOException, URISyntaxException {
+        PrintWriter out = new PrintWriter(clientSocket.getOutputStream(), true);
+        BufferedReader in = new BufferedReader(new InputStreamReader(clientSocket.getInputStream()));
+        String inputLine, outputLine;
+        ArrayList<String> request = new ArrayList<String>();
+        while ((inputLine = in.readLine()) != null) {
+            System.out.println("Received: " + inputLine);
+            request.add(inputLine);
+            if (!in.ready()) {
+                break;
+            }
+        }
+        String uriStr = request.get(0).split(" ")[1];
+        URI resourceURI = new URI(uriStr);
+        System.out.println("uri path " + resourceURI.getPath());
+        System.out.println("uri query " + resourceURI.getQuery());
+        if (resourceURI.getPath().startsWith("/do/")) {
+            outputLine = getServiceResponse(resourceURI);
+            // outputLine = defaultHttpMessage(); ;
+            out.println(outputLine);
+        } else {
+            outputLine = getHtmlResource(resourceURI);
+            // outputLine = defaultHttpMessage(); ;
+            out.println(outputLine);
+        }
 
-		for (String component : componentsList) {
-			try {
-				Class<?> c = Class.forName(component);
-				for (Method m : c.getDeclaredMethods()) {
-					if (m.isAnnotationPresent(GetMapping.class)) {
-						String uri = m.getAnnotation(GetMapping.class).value();
-						services.put(uri, m);
-					}
-				}
-			} catch (ClassNotFoundException ex) {
-				Logger.getLogger(HttpServer.class.getName()).log(Level.SEVERE, "Component not found.", ex);
-			}
-		}
-	}
+        out.close();
 
-	public String getServiceResponse(URI serviceURI) {
-		String response = "";
-		// The path has the form: "/do/*"
-		Method m = services.get(serviceURI.getPath().substring(3));
-		try {
-			if (m == null) {
-				return "Service not found";
-			}
-			response = m.invoke(null).toString();
-		} catch (IllegalAccessException ex) {
-			Logger.getLogger(HttpServer.class.getName()).log(Level.SEVERE, null, ex);
-		} catch (IllegalArgumentException ex) {
-			Logger.getLogger(HttpServer.class.getName()).log(Level.SEVERE, null, ex);
-		} catch (InvocationTargetException ex) {
-			Logger.getLogger(HttpServer.class.getName()).log(Level.SEVERE, null, ex);
-		}
-		response = "HTTP/1.1 200 OK\r\n" + "Content-Type: text/html\r\n" + "\r\n" + response;
-		return response;
-	}
+        in.close();
 
-	public String getResponse(String path) {
-		String type = "text/html";
-		if (path.endsWith(".css")) {
-			type = "text/css";
-		} else if (path.endsWith(".js")) {
-			type = "text/javascript";
-		}
+        clientSocket.close();
+    }
 
-		Path file = Paths.get("./www" + path);
-		Charset charset = Charset.forName("UTF-8");
-		String outMsg = "";
-		try {
-			BufferedReader reader = Files.newBufferedReader(file, charset);
-			String line = null;
-			while ((line = reader.readLine()) != null) {
-				System.out.println(line);
-				outMsg += "\r\n" + line;
-			}
-		} catch (IOException x) {
-			System.err.format("IOException: %s%n", x);
-		}
+    public String getServiceResponse(URI serviceURI) {
+        String response = "";
+        // the path has the form: "/do/*"
+        Method m = services.get(serviceURI.getPath().substring(3));
+        if(m == null){
+            return default404HTMLResponse("Service Not found");
+        }
+        try {
+            response = m.invoke(null,serviceURI.getQuery()).toString();
+        } catch (IllegalAccessException e) {
+            Logger.getLogger(HttpServer.class.getName()).log(Level.SEVERE, "Component not found", e);
+        } catch (InvocationTargetException e) {
+            Logger.getLogger(HttpServer.class.getName()).log(Level.SEVERE, "Component not found", e);
+        }
+        response = "HTTP/1.1 200 OK\r\n" + "Content-Type: text/html\r\n" + "\r\n" + response;
+        return response;
+    }
 
-		return "HTTP/1.1 200 OK\r\n" + "Content-Type: " + type + "\r\n" + "\r\n" + "<!DOCTYPE html>" + outMsg;
-	}
+    private String getHtmlResource(URI resourceURI) {
+        String type = "text/html";
+        if (resourceURI.getPath().endsWith(".css")) {
+            type = "text/css";
+        } else if (resourceURI.getPath().endsWith(".js")) {
+            type = "text/javascript";
+        } else if (resourceURI.getPath().endsWith(".jpeg")) {
+            type = "image/jpeg";
+        } else if (resourceURI.getPath().endsWith(".png")) {
+            type = "image/png";
+        }
+        // para leer archivos
+        Path file = Paths.get("public_html" + resourceURI.getPath());
+        Charset charset = Charset.forName("UTF-8");
+        String response = "";
+        try (BufferedReader reader = Files.newBufferedReader(file, charset)) {
+            String line = null;
+            while ((line = reader.readLine()) != null) {
+                System.out.println(line);
+                response = "HTTP/1.1 200 OK\r\n" + "Content-Type: " + type + "\r\n" + "\r\n" + line;
+                ;
+            }
+        } catch (IOException x) {
+            System.err.format("IOException: %s%n", x);
+        }
+        return response;
+    }
 
-	public static HttpServer getInstance() {
-		return _instance;
-	}
+    public String defaultHttpMessage(){
+        String outputLine =
+                "HTTP/1.1 200 OK\r\n"
+                        + "Content-Type: text/html\r\n"
+                        + "\r\n"
+                        + "<!DOCTYPE html>"
+                        + "<html>"
+                        + " <head>"
+                        + " <title>TODO supply a title</title>"
+                        + " <meta charset=\"UTF-8\">"
+                        + " <meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">"
+                        + " </head>"
+                        + " <body>"
+                        + " <div><h1>My first page.</h1></div>"
+                        + " <img src=\"https://hubblesite.org/files/live/sites/hubble/files/home/resource-gallery/articles/_images/STSCI-H-p1427a-2300x2100.jpg?t=tn1200\">"
+                        + " </body>"
+                        + "</html>";
+        return outputLine;
+    }
+
+    public String default404HTMLResponse(String msg){
+        String outputLine =
+            "HTTP/1.1 404 OK\r\n"
+                    + "Content-Type: text/html\r\n"
+                    + "\r\n"
+                    + "<!DOCTYPE html>"
+                    + "<html>"
+                    + " <head>"
+                    + " <title>404</title>"
+                    + " <meta charset=\"UTF-8\">"
+                    + " <meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">"
+                    + " </head>"
+                    + " <body>"
+                    + " <div><h1>"+msg+"</h1></div>"
+                    + " </body>"
+                    + "</html>";
+        return outputLine;        
+    }
 }
