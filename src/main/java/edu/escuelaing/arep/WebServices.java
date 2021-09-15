@@ -1,4 +1,5 @@
 package edu.escuelaing.arep;
+
 import java.io.File;
 import java.io.IOException;
 import java.util.logging.Level;
@@ -11,8 +12,9 @@ import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.List;
 
-public class WebAppStart {
+public class WebServices {
     public static void main(String[] args) {
+        // findComponents();
         try {
             HttpServer.getInstance().startServer(findComponents());
         } catch (Exception e) {
@@ -22,16 +24,22 @@ public class WebAppStart {
 
     public static List<String> findComponents() {
         List<String> javaFiles = new ArrayList<String>();
+        List<String> components = new ArrayList<String>();
+        String path = "./src/main/java/edu/escuelaing/arep";
         try {
-            javaFiles = Files.walk(Paths.get("./src/main/java/co/org/escuelaing/networking")).map(Path::getFileName)
-                    .map(Path::toString).filter(n -> n.endsWith(".java"))
-                    .filter(c -> c.getClass().isAnnotationPresent(Component.class)).collect(Collectors.toList());
+            javaFiles = Files.walk(Paths.get(path)).map(Path::getFileName).map(Path::toString)
+                    .filter(n -> n.endsWith(".java")).collect(Collectors.toList());
 
-            System.out.println(javaFiles);
+            for (String name : javaFiles) {
+                Class<?> cls = Class.forName("edu.escuelaing.arep." + name.substring(0, name.length() - 5));
+                if (cls.isAnnotationPresent(Component.class)) {
+                    components.add("edu.escuelaing.arep." + name.substring(0, name.length() - 5));
+                }
+            }
         } catch (Exception e) {
-            Logger.getLogger(WebAppStart.class.getName()).log(Level.SEVERE, e.getMessage(), e);
+            Logger.getLogger(WebServices.class.getName()).log(Level.SEVERE, e.getMessage(), e);
         }
 
-        return javaFiles;
+        return components;
     }
 }

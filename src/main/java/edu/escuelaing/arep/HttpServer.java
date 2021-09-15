@@ -54,20 +54,20 @@ public class HttpServer {
 
     private void loadComponents(List<String> componentsList) {
         for (String component : componentsList) {
-            Class c = null;
+            Class<?> c = null;
             try {
                 c = Class.forName(component);
                 for (Method m : c.getDeclaredMethods()) {
-                    if (m.isAnnotationPresent(RequestMapping.class)) {
-                        String uri = m.getAnnotation(RequestMapping.class).value();
+                    if (m.isAnnotationPresent(GetMapping.class)) {
+                        String uri = m.getAnnotation(GetMapping.class).value();
                         services.put(uri, m);
                     }
                 }
-                ;
             } catch (ClassNotFoundException e) {
                 Logger.getLogger(HttpServer.class.getName()).log(Level.SEVERE, "Component not found", e);
             }
         }
+		System.out.println(services);
     }
 
     public void messageConnection(Socket clientSocket) throws IOException, URISyntaxException {

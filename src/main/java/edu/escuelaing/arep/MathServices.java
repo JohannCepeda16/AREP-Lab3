@@ -1,7 +1,5 @@
 package edu.escuelaing.arep;
 
-import edu.escuelaing.arep.anotations.Component;
-
 @Component
 public class MathServices {
 
